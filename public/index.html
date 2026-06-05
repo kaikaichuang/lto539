@@ -25,6 +25,12 @@
           <span id="data-range"></span>
           <button id="refresh-btn" class="btn btn-sm" onclick="fetchData()">重新整理</button>
         </div>
+        <div class="period-select">
+          <span class="period-label">分析期數：</span>
+          <button class="period-btn active" data-periods="45">近45期</button>
+          <button class="period-btn" data-periods="30">近30期</button>
+          <span class="period-hint">期數越少越能反映近期趨勢</span>
+        </div>
       </section>
 
       <!-- User Input -->
@@ -89,6 +95,8 @@
           <button class="tab active" data-tab="frequency">號碼頻率</button>
           <button class="tab" data-tab="hotcold">冷熱號</button>
           <button class="tab" data-tab="missing">遺漏值</button>
+          <button class="tab" data-tab="interval">間隔預測</button>
+          <button class="tab" data-tab="association">關聯號碼</button>
           <button class="tab" data-tab="oddeven">奇偶分析</button>
           <button class="tab" data-tab="bigsmall">大小分析</button>
           <button class="tab" data-tab="tail">尾數分析</button>

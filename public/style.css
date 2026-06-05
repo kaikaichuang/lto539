@@ -499,6 +499,97 @@ footer {
   background: rgba(0, 0, 0, 0.15);
 }
 
+.period-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.period-label {
+  color: #ccc;
+  font-size: 0.9em;
+}
+
+.period-btn {
+  padding: 6px 16px;
+  border: 1px solid rgba(255, 210, 0, 0.3);
+  border-radius: 6px;
+  background: transparent;
+  color: #ccc;
+  cursor: pointer;
+  font-size: 0.9em;
+  transition: all 0.2s;
+}
+
+.period-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.period-btn.active {
+  background: linear-gradient(135deg, #f7971e, #ffd200);
+  color: #1a1a2e;
+  font-weight: 600;
+  border-color: #ffd200;
+}
+
+.period-hint {
+  color: #888;
+  font-size: 0.8em;
+}
+
+.assoc-picker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.assoc-picker label {
+  color: #ccc;
+  font-size: 0.95em;
+}
+
+.assoc-picker select {
+  padding: 8px 14px;
+  border: 2px solid rgba(255, 210, 0, 0.3);
+  border-radius: 8px;
+  background: #24243e;
+  color: #fff;
+  font-size: 1.05em;
+  cursor: pointer;
+  outline: none;
+}
+
+.assoc-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.assoc-col h3 {
+  font-size: 1em;
+  margin-bottom: 12px;
+}
+
+.assoc-col:first-child h3 {
+  color: #ffd200;
+}
+
+.assoc-col:last-child h3 {
+  color: #00f2fe;
+}
+
+@media (max-width: 600px) {
+  .assoc-cols {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}
+
 .pair-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));

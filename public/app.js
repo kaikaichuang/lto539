@@ -1,4 +1,7 @@
-let drawData = [];
+let allDrawData = [];      // 伺服器抓回的完整資料（最多45期）
+let drawData = [];         // 目前分析使用的期數切片（30 或 45）
+let currentPeriods = 45;   // 目前選擇的載入期數
+let activeTab = 'frequency';
 
 const COST_PER_BET = 75;
 const STAR_CONFIG = [
@@ -13,7 +16,16 @@ document.addEventListener('DOMContentLoaded', () => {
     tab.addEventListener('click', () => {
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
-      renderTabContent(tab.dataset.tab);
+      activeTab = tab.dataset.tab;
+      renderTabContent(activeTab);
+    });
+  });
+  document.querySelectorAll('.period-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      currentPeriods = parseInt(btn.dataset.periods);
+      document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      applyPeriodSelection();
     });
   });
 });
@@ -31,21 +43,33 @@ async function fetchData() {
       throw new Error(json.error || '取得資料失敗');
     }
 
-    drawData = json.data;
+    allDrawData = json.data;
     document.getElementById('loading').style.display = 'none';
     document.getElementById('main-content').style.display = 'block';
 
-    const range = drawData.length > 0
-      ? `已載入 ${drawData.length} 期資料（${formatDate(drawData[drawData.length - 1].date)} ~ ${formatDate(drawData[0].date)}）`
-      : '無資料';
-    document.getElementById('data-range').textContent = range;
-
-    renderDrawTable();
-    renderTabContent('frequency');
+    applyPeriodSelection();
   } catch (err) {
     document.getElementById('loading').style.display = 'none';
     document.getElementById('error-msg').style.display = 'block';
     document.getElementById('error-msg').textContent = '載入失敗: ' + err.message;
+  }
+}
+
+// 根據目前選擇的期數（30/45）切片並重新渲染所有分析
+function applyPeriodSelection() {
+  drawData = allDrawData.slice(0, currentPeriods);
+
+  const range = drawData.length > 0
+    ? `已載入 ${drawData.length} 期資料（${formatDate(drawData[drawData.length - 1].date)} ~ ${formatDate(drawData[0].date)}）`
+    : '無資料';
+  document.getElementById('data-range').textContent = range;
+
+  renderDrawTable();
+  renderTabContent(activeTab);
+
+  // 若已產生過推薦，依新期數重新計算
+  if (document.getElementById('recommendation').style.display === 'block') {
+    generateRecommendation();
   }
 }
 
@@ -178,6 +202,75 @@ function getACStats() {
   }));
 }
 
+// ===== 進階規律分析 =====
+// 註：drawData[0] 為最新一期，index 越大越舊
+
+// 間隔規律：每個號碼平均隔幾期出現、目前已幾期未出現、預測下次
+function getIntervalStats() {
+  const result = [];
+  for (let n = 1; n <= 39; n++) {
+    // 找出該號碼出現的所有期數索引（由新到舊）
+    const idx = [];
+    drawData.forEach((d, i) => { if (d.numbers.includes(n)) idx.push(i); });
+
+    if (idx.length === 0) {
+      result.push({ num: n, count: 0, avgGap: null, currentMissing: drawData.length, predictedIn: null, overdue: true, gaps: [] });
+      continue;
+    }
+
+    // 相鄰兩次出現的間隔（期數差）
+    const gaps = [];
+    for (let i = 0; i < idx.length - 1; i++) {
+      gaps.push(idx[i + 1] - idx[i]);
+    }
+    const avgGap = gaps.length ? gaps.reduce((a, b) => a + b, 0) / gaps.length : null;
+    const currentMissing = idx[0]; // 最近一次出現距今幾期（0=最新期就有）
+    let predictedIn = null, overdue = false;
+    if (avgGap !== null) {
+      predictedIn = Math.round(avgGap - currentMissing);
+      if (predictedIn <= 0) { overdue = true; predictedIn = 0; }
+    }
+    result.push({ num: n, count: idx.length, avgGap, currentMissing, predictedIn, overdue, gaps });
+  }
+  return result;
+}
+
+// 號碼關聯：選定號碼 num，統計「同期一起出現」與「下一期接著出現」的伴隨號碼
+function getNumberAssociation(num) {
+  const sameDraw = {};   // 同期伴隨
+  const nextDraw = {};   // 下一期接著出現
+  for (let i = 1; i <= 39; i++) { sameDraw[i] = 0; nextDraw[i] = 0; }
+
+  let appearCount = 0;
+  let nextChances = 0;
+
+  drawData.forEach((d, i) => {
+    if (!d.numbers.includes(num)) return;
+    appearCount++;
+
+    // 同期：同一張開獎裡的其他號碼
+    d.numbers.forEach(other => { if (other !== num) sameDraw[other]++; });
+
+    // 下一期：index i-1 為時間上「之後」的那一期（更新）
+    if (i - 1 >= 0) {
+      nextChances++;
+      drawData[i - 1].numbers.forEach(other => { nextDraw[other]++; });
+    }
+  });
+
+  const toSorted = (obj) => Object.entries(obj)
+    .map(([n, c]) => ({ num: parseInt(n), count: c }))
+    .filter(x => x.count > 0)
+    .sort((a, b) => b.count - a.count);
+
+  return {
+    appearCount,
+    nextChances,
+    sameDraw: toSorted(sameDraw),
+    nextDraw: toSorted(nextDraw)
+  };
+}
+
 // ===== Tab Rendering =====
 
 function renderTabContent(tab) {
@@ -186,6 +279,8 @@ function renderTabContent(tab) {
     frequency: renderFrequency,
     hotcold: renderHotCold,
     missing: renderMissing,
+    interval: renderInterval,
+    association: renderAssociation,
     oddeven: renderOddEven,
     bigsmall: renderBigSmall,
     tail: renderTail,
@@ -252,6 +347,119 @@ function renderMissing(el) {
     </div>`;
   }
   el.innerHTML = html;
+}
+
+// 間隔預測：每個號碼平均隔幾期出現、目前已幾期沒出現、預測還要幾期
+function renderInterval(el) {
+  const stats = getIntervalStats().filter(s => s.count > 0);
+
+  // 即將到期（overdue 或 predictedIn 很小）排前面
+  const sorted = [...stats].sort((a, b) => {
+    if (a.overdue !== b.overdue) return a.overdue ? -1 : 1;
+    return (a.predictedIn ?? 99) - (b.predictedIn ?? 99);
+  });
+
+  let html = `<div class="analysis-summary">
+    <strong>間隔規律分析</strong>：統計每個號碼「平均隔幾期出現一次」，再對照「目前已幾期沒出現」，
+    推算<strong>預計還要幾期</strong>會再出現。<br>
+    <span style="color:#ff4b2b">紅色=已超過平均間隔（隨時可能開出）</span>，數字越小代表越接近預測出現時機。
+  </div>`;
+
+  html += `<div class="table-wrapper"><table class="profit-table">
+    <thead><tr>
+      <th>號碼</th><th>出現次數</th><th>平均間隔</th><th>已幾期未出</th><th>預計再幾期出現</th>
+    </tr></thead><tbody>`;
+
+  for (const s of sorted) {
+    const statusCls = s.overdue ? 'negative' : 'positive';
+    const predictText = s.overdue
+      ? '<span class="negative">已到期 ★</span>'
+      : `<span class="${statusCls}">約 ${s.predictedIn} 期後</span>`;
+    html += `<tr>
+      <td><span class="ball small-ball">${String(s.num).padStart(2, '0')}</span></td>
+      <td>${s.count} 次</td>
+      <td>${s.avgGap !== null ? s.avgGap.toFixed(1) + ' 期' : '-'}</td>
+      <td>${s.currentMissing} 期</td>
+      <td>${predictText}</td>
+    </tr>`;
+  }
+  html += '</tbody></table></div>';
+  el.innerHTML = html;
+}
+
+// 號碼關聯：選一個號碼，看它常跟哪些號碼「同期出現」與「下一期接著出現」
+function renderAssociation(el) {
+  const options = [];
+  for (let i = 1; i <= 39; i++) {
+    options.push(`<option value="${i}" ${i === associationNum ? 'selected' : ''}>${String(i).padStart(2, '0')}</option>`);
+  }
+
+  let html = `<div class="analysis-summary">
+    <strong>號碼關聯分析</strong>：選一個號碼，分析在近${drawData.length}期中——<br>
+    ① <strong>同期伴隨</strong>：它出現時，最常和哪些號碼一起開出<br>
+    ② <strong>下期接續</strong>：它出現後的「下一期」，最常接著開出哪些號碼
+  </div>`;
+
+  html += `<div class="assoc-picker">
+    <label>選擇號碼：</label>
+    <select id="assoc-select" onchange="onAssociationChange(this.value)">${options.join('')}</select>
+  </div>`;
+
+  html += `<div id="assoc-result"></div>`;
+  el.innerHTML = html;
+  renderAssociationResult();
+}
+
+let associationNum = 2;
+
+function onAssociationChange(val) {
+  associationNum = parseInt(val);
+  renderAssociationResult();
+}
+
+function renderAssociationResult() {
+  const container = document.getElementById('assoc-result');
+  if (!container) return;
+
+  const a = getNumberAssociation(associationNum);
+  const numLabel = String(associationNum).padStart(2, '0');
+
+  if (a.appearCount === 0) {
+    container.innerHTML = `<div class="analysis-summary">號碼 ${numLabel} 在近${drawData.length}期中未曾出現。</div>`;
+    return;
+  }
+
+  const renderList = (list, total, color) => {
+    if (!list.length) return '<p style="color:#999">無資料</p>';
+    const max = list[0].count;
+    return list.slice(0, 12).map(x => {
+      const pct = (x.count / max * 100).toFixed(0);
+      const rate = total > 0 ? (x.count / total * 100).toFixed(0) : 0;
+      return `<div class="freq-bar-container">
+        <span class="freq-bar-label">${String(x.num).padStart(2, '0')}</span>
+        <div class="freq-bar-wrap">
+          <div class="freq-bar ${color}" style="width:${Math.max(pct, 10)}%">${x.count}次 (${rate}%)</div>
+        </div>
+      </div>`;
+    }).join('');
+  };
+
+  let html = `<div class="analysis-summary" style="margin-top:16px">
+    號碼 <strong>${numLabel}</strong> 在近${drawData.length}期中共出現 <strong>${a.appearCount}</strong> 次
+  </div>`;
+
+  html += `<div class="assoc-cols">`;
+  html += `<div class="assoc-col">
+    <h3>① 同期最常一起出現</h3>
+    ${renderList(a.sameDraw, a.appearCount, 'warm')}
+  </div>`;
+  html += `<div class="assoc-col">
+    <h3>② 下一期最常接著出現</h3>
+    ${renderList(a.nextDraw, a.nextChances, 'cool')}
+  </div>`;
+  html += `</div>`;
+
+  container.innerHTML = html;
 }
 
 function renderOddEven(el) {
@@ -546,6 +754,17 @@ function calculateScores() {
         }
         break;
       }
+    }
+  }
+
+  // 間隔規律：已達/超過平均出現間隔的號碼，依預測時機加分
+  const intervals = getIntervalStats();
+  for (const s of intervals) {
+    if (s.avgGap === null) continue;
+    if (s.overdue) {
+      scores[s.num] += 15;           // 已到期，隨時可能開出
+    } else if (s.predictedIn <= 1) {
+      scores[s.num] += 8;            // 即將到期
     }
   }
 
