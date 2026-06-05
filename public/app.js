@@ -36,7 +36,7 @@ async function fetchData() {
     document.getElementById('main-content').style.display = 'block';
 
     const range = drawData.length > 0
-      ? `已載入 ${drawData.length} 期資料（${drawData[drawData.length - 1].date} ~ ${drawData[0].date}）`
+      ? `已載入 ${drawData.length} 期資料（${formatDate(drawData[drawData.length - 1].date)} ~ ${formatDate(drawData[0].date)}）`
       : '無資料';
     document.getElementById('data-range').textContent = range;
 
@@ -49,13 +49,22 @@ async function fetchData() {
   }
 }
 
+// 來源日期格式為「MM/DDYY(週)」，例如 06/0426(四) = 2026/06/04 星期四
+function formatDate(raw) {
+  if (!raw) return '';
+  const m = raw.match(/^(\d{2})\/(\d{2})(\d{2})\s*(\(.+\))?/);
+  if (!m) return raw;
+  const [, mm, dd, yy, week] = m;
+  return `20${yy}/${mm}/${dd} ${week || ''}`.trim();
+}
+
 function renderDrawTable() {
   const tbody = document.getElementById('draw-body');
   tbody.innerHTML = drawData.map(d => `
     <tr>
       <td>${d.period}</td>
-      <td>${d.date}</td>
-      <td>${d.numbers.map(n => `<span class="ball">${n}</span>`).join('')}</td>
+      <td>${formatDate(d.date)}</td>
+      <td>${d.numbers.map(n => `<span class="ball">${String(n).padStart(2, '0')}</span>`).join('')}</td>
     </tr>
   `).join('');
 }
