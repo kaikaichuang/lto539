@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>今彩539 - 智慧分析推薦系統</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>今彩539 智慧分析推薦系統</h1>
+      <p class="subtitle">根據近45期歷史開獎資料，透過多維度統計分析推薦號碼</p>
+    </header>
+
+    <div id="loading" class="loading">
+      <div class="spinner"></div>
+      <p>正在載入歷史開獎資料...</p>
+    </div>
+
+    <div id="main-content" style="display:none;">
+      <!-- Data Status -->
+      <section class="card data-status">
+        <div class="status-info">
+          <span id="data-range"></span>
+          <button id="refresh-btn" class="btn btn-sm" onclick="fetchData()">重新整理</button>
+        </div>
+      </section>
+
+      <!-- User Input -->
+      <section class="card">
+        <h2>選擇號碼數量</h2>
+        <p class="hint">輸入您想選取的號碼數量（2~20碼），碼數越少提供規律準確度越高</p>
+        <div class="input-group">
+          <input type="number" id="num-count" min="2" max="20" value="5" placeholder="輸入2~20">
+          <button class="btn btn-primary" onclick="generateRecommendation()">產生推薦號碼</button>
+        </div>
+        <div class="star-select">
+          <p class="hint" style="margin-top:12px;">選擇投注星級：</p>
+          <label class="checkbox-label"><input type="checkbox" id="star2" checked> 二星（獎金 $5,300）</label>
+          <label class="checkbox-label"><input type="checkbox" id="star3" checked> 三星（獎金 $57,000）</label>
+          <label class="checkbox-label"><input type="checkbox" id="star4" checked> 四星（獎金 $750,000）</label>
+        </div>
+      </section>
+
+      <!-- Recommendation Result -->
+      <section id="recommendation" class="card" style="display:none;">
+        <h2>推薦號碼</h2>
+        <div id="rec-numbers" class="number-balls"></div>
+        <div id="rec-reason" class="rec-reason"></div>
+      </section>
+
+      <!-- Cost Calculation -->
+      <section id="cost-section" class="card" style="display:none;">
+        <h2>碰數與成本計算</h2>
+        <div id="cost-detail"></div>
+
+        <h3 id="profit-header">獲利試算</h3>
+        <table class="profit-table">
+          <thead>
+            <tr>
+              <th>星級</th>
+              <th>碰數</th>
+              <th>單碰成本</th>
+              <th>該星成本</th>
+              <th>單注獎金</th>
+              <th>中獎碰數</th>
+              <th>總獎金</th>
+              <th>淨獲利</th>
+            </tr>
+          </thead>
+          <tbody id="profit-body"></tbody>
+          <tfoot>
+            <tr class="total-row">
+              <td colspan="3"><strong>合計</strong></td>
+              <td id="total-cost-cell"></td>
+              <td colspan="2"></td>
+              <td id="total-prize-cell"></td>
+              <td id="total-profit-cell"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </section>
+
+      <!-- Analysis Tabs -->
+      <section class="card">
+        <h2>統計分析</h2>
+        <div class="tabs">
+          <button class="tab active" data-tab="frequency">號碼頻率</button>
+          <button class="tab" data-tab="hotcold">冷熱號</button>
+          <button class="tab" data-tab="missing">遺漏值</button>
+          <button class="tab" data-tab="oddeven">奇偶分析</button>
+          <button class="tab" data-tab="bigsmall">大小分析</button>
+          <button class="tab" data-tab="tail">尾數分析</button>
+          <button class="tab" data-tab="range">區間分佈</button>
+          <button class="tab" data-tab="sum">和值走勢</button>
+          <button class="tab" data-tab="consecutive">連號分析</button>
+          <button class="tab" data-tab="ac">AC值分析</button>
+        </div>
+        <div id="tab-content" class="tab-content"></div>
+      </section>
+
+      <!-- Recent Draws -->
+      <section class="card">
+        <h2>近45期開獎紀錄</h2>
+        <div class="table-wrapper">
+          <table class="draw-table">
+            <thead>
+              <tr>
+                <th>期數</th>
+                <th>日期</th>
+                <th>開獎號碼</th>
+              </tr>
+            </thead>
+            <tbody id="draw-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <div id="error-msg" class="error" style="display:none;"></div>
+
+    <footer>
+      <p>本系統僅供參考，不保證中獎。請理性投注。</p>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

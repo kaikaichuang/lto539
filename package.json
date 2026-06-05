@@ -1,0 +1,22 @@
+{
+  "name": "lto539-analyzer",
+  "version": "1.0.0",
+  "description": "今彩539歷史開獎分析與號碼推薦系統",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "axios": "^1.16.1",
+    "cheerio": "^1.2.0",
+    "express": "^5.2.1",
+    "iconv-lite": "^0.7.2"
+  }
+}

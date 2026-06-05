@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: lto539
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 18.20.4

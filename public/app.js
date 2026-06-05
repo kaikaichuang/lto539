@@ -1,0 +1,717 @@
+let drawData = [];
+
+const COST_PER_BET = 75;
+const STAR_CONFIG = [
+  { key: 'star2', name: '二星', pick: 2, prize: 5300 },
+  { key: 'star3', name: '三星', pick: 3, prize: 57000 },
+  { key: 'star4', name: '四星', pick: 4, prize: 750000 }
+];
+
+document.addEventListener('DOMContentLoaded', () => {
+  fetchData();
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      renderTabContent(tab.dataset.tab);
+    });
+  });
+});
+
+async function fetchData() {
+  document.getElementById('loading').style.display = 'block';
+  document.getElementById('main-content').style.display = 'none';
+  document.getElementById('error-msg').style.display = 'none';
+
+  try {
+    const res = await fetch('/api/lottery');
+    const json = await res.json();
+
+    if (!json.success) {
+      throw new Error(json.error || '取得資料失敗');
+    }
+
+    drawData = json.data;
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('main-content').style.display = 'block';
+
+    const range = drawData.length > 0
+      ? `已載入 ${drawData.length} 期資料（${drawData[drawData.length - 1].date} ~ ${drawData[0].date}）`
+      : '無資料';
+    document.getElementById('data-range').textContent = range;
+
+    renderDrawTable();
+    renderTabContent('frequency');
+  } catch (err) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('error-msg').style.display = 'block';
+    document.getElementById('error-msg').textContent = '載入失敗: ' + err.message;
+  }
+}
+
+function renderDrawTable() {
+  const tbody = document.getElementById('draw-body');
+  tbody.innerHTML = drawData.map(d => `
+    <tr>
+      <td>${d.period}</td>
+      <td>${d.date}</td>
+      <td>${d.numbers.map(n => `<span class="ball">${n}</span>`).join('')}</td>
+    </tr>
+  `).join('');
+}
+
+// ===== Analysis Functions =====
+
+function getFrequency() {
+  const freq = {};
+  for (let i = 1; i <= 39; i++) freq[i] = 0;
+  drawData.forEach(d => d.numbers.forEach(n => freq[n]++));
+  return freq;
+}
+
+function getMissingValues() {
+  const missing = {};
+  for (let i = 1; i <= 39; i++) missing[i] = -1;
+
+  for (let i = 0; i < drawData.length; i++) {
+    drawData[i].numbers.forEach(n => {
+      if (missing[n] === -1) missing[n] = i;
+    });
+  }
+
+  for (let i = 1; i <= 39; i++) {
+    if (missing[i] === -1) missing[i] = drawData.length;
+  }
+  return missing;
+}
+
+function getOddEvenStats() {
+  return drawData.map(d => {
+    const odd = d.numbers.filter(n => n % 2 === 1).length;
+    return { period: d.period, date: d.date, odd, even: 5 - odd, ratio: `${odd}:${5 - odd}` };
+  });
+}
+
+function getBigSmallStats() {
+  return drawData.map(d => {
+    const small = d.numbers.filter(n => n <= 19).length;
+    return { period: d.period, date: d.date, small, big: 5 - small, ratio: `${small}:${5 - small}` };
+  });
+}
+
+function getTailStats() {
+  const tails = {};
+  for (let i = 0; i <= 9; i++) tails[i] = 0;
+  drawData.forEach(d => d.numbers.forEach(n => tails[n % 10]++));
+  return tails;
+}
+
+function getRangeStats() {
+  const ranges = { '01-07': 0, '08-14': 0, '15-21': 0, '22-28': 0, '29-35': 0, '36-39': 0 };
+  const rangeDef = [[1,7],[8,14],[15,21],[22,28],[29,35],[36,39]];
+  const keys = Object.keys(ranges);
+
+  drawData.forEach(d => d.numbers.forEach(n => {
+    for (let i = 0; i < rangeDef.length; i++) {
+      if (n >= rangeDef[i][0] && n <= rangeDef[i][1]) {
+        ranges[keys[i]]++;
+        break;
+      }
+    }
+  }));
+  return ranges;
+}
+
+function getSumStats() {
+  return drawData.map(d => ({
+    period: d.period,
+    date: d.date,
+    sum: d.numbers.reduce((a, b) => a + b, 0)
+  }));
+}
+
+function getConsecutiveStats() {
+  let totalWithConsec = 0;
+  const pairCount = {};
+
+  drawData.forEach(d => {
+    const sorted = [...d.numbers].sort((a, b) => a - b);
+    let hasConsec = false;
+    for (let i = 0; i < sorted.length - 1; i++) {
+      if (sorted[i + 1] - sorted[i] === 1) {
+        hasConsec = true;
+        const key = `${sorted[i]}-${sorted[i + 1]}`;
+        pairCount[key] = (pairCount[key] || 0) + 1;
+      }
+    }
+    if (hasConsec) totalWithConsec++;
+  });
+
+  return { totalWithConsec, rate: totalWithConsec / drawData.length, pairCount };
+}
+
+function getACValue(numbers) {
+  const sorted = [...numbers].sort((a, b) => a - b);
+  const diffs = new Set();
+  for (let i = 0; i < sorted.length; i++) {
+    for (let j = i + 1; j < sorted.length; j++) {
+      diffs.add(sorted[j] - sorted[i]);
+    }
+  }
+  return diffs.size - (sorted.length - 1);
+}
+
+function getACStats() {
+  return drawData.map(d => ({
+    period: d.period,
+    date: d.date,
+    ac: getACValue(d.numbers)
+  }));
+}
+
+// ===== Tab Rendering =====
+
+function renderTabContent(tab) {
+  const container = document.getElementById('tab-content');
+  const renderers = {
+    frequency: renderFrequency,
+    hotcold: renderHotCold,
+    missing: renderMissing,
+    oddeven: renderOddEven,
+    bigsmall: renderBigSmall,
+    tail: renderTail,
+    range: renderRange,
+    sum: renderSum,
+    consecutive: renderConsecutive,
+    ac: renderAC
+  };
+  if (renderers[tab]) renderers[tab](container);
+}
+
+function renderFrequency(el) {
+  const freq = getFrequency();
+  const maxFreq = Math.max(...Object.values(freq));
+
+  let html = '<div class="analysis-summary">各號碼在近' + drawData.length + '期中出現的次數分佈：</div>';
+  for (let i = 1; i <= 39; i++) {
+    const pct = (freq[i] / maxFreq * 100).toFixed(0);
+    const cls = freq[i] >= maxFreq * 0.8 ? 'hot' : freq[i] >= maxFreq * 0.5 ? 'warm' : freq[i] >= maxFreq * 0.3 ? 'cool' : 'cold';
+    html += `<div class="freq-bar-container">
+      <span class="freq-bar-label">${String(i).padStart(2, '0')}</span>
+      <div class="freq-bar-wrap">
+        <div class="freq-bar ${cls}" style="width:${Math.max(pct, 8)}%">${freq[i]}次</div>
+      </div>
+    </div>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderHotCold(el) {
+  const freq = getFrequency();
+  const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1]);
+  const hot = sorted.slice(0, 10);
+  const cold = sorted.slice(-10).reverse();
+
+  let html = '<div class="analysis-summary">根據近' + drawData.length + '期出現頻率，分析最熱與最冷號碼：</div>';
+  html += '<h3 style="color:#ff4b2b;margin-bottom:12px;">熱號 TOP 10（出現頻率最高）</h3>';
+  html += '<div class="number-balls">' + hot.map(([n, c]) =>
+    `<div style="text-align:center"><span class="ball hot">${n}</span><div style="font-size:0.75em;color:#999;margin-top:4px">${c}次</div></div>`
+  ).join('') + '</div>';
+
+  html += '<h3 style="color:#4facfe;margin:20px 0 12px;">冷號 TOP 10（出現頻率最低）</h3>';
+  html += '<div class="number-balls">' + cold.map(([n, c]) =>
+    `<div style="text-align:center"><span class="ball cold">${n}</span><div style="font-size:0.75em;color:#999;margin-top:4px">${c}次</div></div>`
+  ).join('') + '</div>';
+
+  el.innerHTML = html;
+}
+
+function renderMissing(el) {
+  const missing = getMissingValues();
+  const sorted = Object.entries(missing).sort((a, b) => b[1] - a[1]);
+  const maxMiss = Math.max(...Object.values(missing));
+
+  let html = '<div class="analysis-summary">遺漏值 = 該號碼距上次開出已間隔的期數，遺漏值越大表示越久未開出：</div>';
+  for (const [num, val] of sorted) {
+    const pct = maxMiss > 0 ? (val / maxMiss * 100).toFixed(0) : 0;
+    const cls = val >= maxMiss * 0.7 ? 'hot' : val >= maxMiss * 0.4 ? 'warm' : 'cool';
+    html += `<div class="freq-bar-container">
+      <span class="freq-bar-label">${String(num).padStart(2, '0')}</span>
+      <div class="freq-bar-wrap">
+        <div class="freq-bar ${cls}" style="width:${Math.max(pct, 8)}%">${val}期</div>
+      </div>
+    </div>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderOddEven(el) {
+  const stats = getOddEvenStats();
+  const ratioCounts = {};
+  stats.forEach(s => ratioCounts[s.ratio] = (ratioCounts[s.ratio] || 0) + 1);
+
+  let html = '<div class="analysis-summary">分析每期開獎號碼的奇偶數比例分佈，539共5個號碼：</div>';
+  html += '<h3>奇偶比分佈統計</h3>';
+  const maxR = Math.max(...Object.values(ratioCounts));
+  for (const [ratio, count] of Object.entries(ratioCounts).sort((a, b) => b[1] - a[1])) {
+    const pct = (count / maxR * 100).toFixed(0);
+    html += `<div class="freq-bar-container">
+      <span class="freq-bar-label" style="width:40px">${ratio}</span>
+      <div class="freq-bar-wrap">
+        <div class="freq-bar warm" style="width:${Math.max(pct, 10)}%">${count}期 (${(count/drawData.length*100).toFixed(1)}%)</div>
+      </div>
+    </div>`;
+  }
+
+  html += '<h3 style="margin-top:20px">近期走勢（最近20期）</h3>';
+  html += '<div class="chart-row">';
+  stats.slice(0, 20).reverse().forEach(s => {
+    html += `<div class="chart-bar-wrap">
+      <div class="chart-value">${s.odd}奇</div>
+      <div class="chart-bar" style="height:${s.odd / 5 * 100}%;background:linear-gradient(#f7971e,#ffd200);"></div>
+      <div class="chart-label">${s.period.slice(-3)}</div>
+    </div>`;
+  });
+  html += '</div>';
+
+  el.innerHTML = html;
+}
+
+function renderBigSmall(el) {
+  const stats = getBigSmallStats();
+  const ratioCounts = {};
+  stats.forEach(s => ratioCounts[s.ratio] = (ratioCounts[s.ratio] || 0) + 1);
+
+  let html = '<div class="analysis-summary">大小分析：1~19為小號，20~39為大號，分析每期大小比例：</div>';
+  html += '<h3>大小比分佈統計</h3>';
+  const maxR = Math.max(...Object.values(ratioCounts));
+  for (const [ratio, count] of Object.entries(ratioCounts).sort((a, b) => b[1] - a[1])) {
+    const pct = (count / maxR * 100).toFixed(0);
+    html += `<div class="freq-bar-container">
+      <span class="freq-bar-label" style="width:40px">${ratio}</span>
+      <div class="freq-bar-wrap">
+        <div class="freq-bar cool" style="width:${Math.max(pct, 10)}%">${count}期 (${(count/drawData.length*100).toFixed(1)}%)</div>
+      </div>
+    </div>`;
+  }
+
+  html += '<h3 style="margin-top:20px">近期走勢（最近20期）</h3>';
+  html += '<div class="chart-row">';
+  stats.slice(0, 20).reverse().forEach(s => {
+    html += `<div class="chart-bar-wrap">
+      <div class="chart-value">${s.small}小</div>
+      <div class="chart-bar" style="height:${s.small / 5 * 100}%;background:linear-gradient(#4facfe,#00f2fe);"></div>
+      <div class="chart-label">${s.period.slice(-3)}</div>
+    </div>`;
+  });
+  html += '</div>';
+
+  el.innerHTML = html;
+}
+
+function renderTail(el) {
+  const tails = getTailStats();
+  const maxT = Math.max(...Object.values(tails));
+
+  let html = '<div class="analysis-summary">尾數分析：統計各尾數（0~9）在近' + drawData.length + '期中出現的頻率：</div>';
+  for (let i = 0; i <= 9; i++) {
+    const pct = (tails[i] / maxT * 100).toFixed(0);
+    const cls = tails[i] >= maxT * 0.8 ? 'hot' : tails[i] >= maxT * 0.5 ? 'warm' : 'cool';
+    html += `<div class="freq-bar-container">
+      <span class="freq-bar-label">尾${i}</span>
+      <div class="freq-bar-wrap">
+        <div class="freq-bar ${cls}" style="width:${Math.max(pct, 8)}%">${tails[i]}次</div>
+      </div>
+    </div>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderRange(el) {
+  const ranges = getRangeStats();
+  const maxR = Math.max(...Object.values(ranges));
+
+  let html = '<div class="analysis-summary">將1~39分為6個區間，分析各區間號碼出現頻率：</div>';
+  const colors = ['hot', 'warm', 'warm', 'cool', 'cool', 'cold'];
+  let i = 0;
+  for (const [range, count] of Object.entries(ranges)) {
+    const pct = (count / maxR * 100).toFixed(0);
+    html += `<div class="freq-bar-container">
+      <span class="freq-bar-label" style="width:48px;font-size:0.8em">${range}</span>
+      <div class="freq-bar-wrap">
+        <div class="freq-bar ${colors[i]}" style="width:${Math.max(pct, 8)}%">${count}次</div>
+      </div>
+    </div>`;
+    i++;
+  }
+  el.innerHTML = html;
+}
+
+function renderSum(el) {
+  const sums = getSumStats();
+  const values = sums.map(s => s.sum);
+  const avg = (values.reduce((a, b) => a + b, 0) / values.length).toFixed(1);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+
+  let html = `<div class="analysis-summary">
+    和值 = 每期5個號碼的總和。近${drawData.length}期：平均和值 <strong>${avg}</strong>，
+    最小 <strong>${min}</strong>，最大 <strong>${max}</strong>
+  </div>`;
+
+  html += '<h3>近30期和值走勢</h3>';
+  const recent = sums.slice(0, 30).reverse();
+  const chartMax = Math.max(...recent.map(s => s.sum));
+  const chartMin = Math.min(...recent.map(s => s.sum));
+  const range = chartMax - chartMin || 1;
+
+  html += '<div class="chart-row" style="height:180px;">';
+  recent.forEach(s => {
+    const h = ((s.sum - chartMin) / range * 80 + 20);
+    html += `<div class="chart-bar-wrap">
+      <div class="chart-value">${s.sum}</div>
+      <div class="chart-bar" style="height:${h}%;background:linear-gradient(#f7971e,#ffd200);"></div>
+      <div class="chart-label">${s.period.slice(-3)}</div>
+    </div>`;
+  });
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function renderConsecutive(el) {
+  const stats = getConsecutiveStats();
+  const topPairs = Object.entries(stats.pairCount).sort((a, b) => b[1] - a[1]).slice(0, 15);
+
+  let html = `<div class="analysis-summary">
+    近${drawData.length}期中，有 <strong>${stats.totalWithConsec}</strong> 期出現連號，
+    出現率 <strong>${(stats.rate * 100).toFixed(1)}%</strong>
+  </div>`;
+
+  html += '<h3>最常出現的連號組合</h3>';
+  html += '<div class="pair-grid">';
+  topPairs.forEach(([pair, count]) => {
+    html += `<div class="pair-item"><div class="nums">${pair}</div><div class="count">${count}次</div></div>`;
+  });
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function renderAC(el) {
+  const stats = getACStats();
+  const acCounts = {};
+  stats.forEach(s => acCounts[s.ac] = (acCounts[s.ac] || 0) + 1);
+
+  const values = stats.map(s => s.ac);
+  const avg = (values.reduce((a, b) => a + b, 0) / values.length).toFixed(1);
+
+  let html = `<div class="analysis-summary">
+    AC值（算術複雜度）衡量號碼組合的離散程度，AC值越高號碼越分散。
+    近${drawData.length}期平均AC值：<strong>${avg}</strong>（理論範圍0~7）
+  </div>`;
+
+  html += '<h3>AC值分佈</h3>';
+  const maxAC = Math.max(...Object.values(acCounts));
+  for (const [ac, count] of Object.entries(acCounts).sort((a, b) => a[0] - b[0])) {
+    const pct = (count / maxAC * 100).toFixed(0);
+    html += `<div class="freq-bar-container">
+      <span class="freq-bar-label">AC${ac}</span>
+      <div class="freq-bar-wrap">
+        <div class="freq-bar warm" style="width:${Math.max(pct, 8)}%">${count}期 (${(count/drawData.length*100).toFixed(1)}%)</div>
+      </div>
+    </div>`;
+  }
+
+  html += '<h3 style="margin-top:20px">近20期AC值走勢</h3>';
+  html += '<div class="chart-row">';
+  stats.slice(0, 20).reverse().forEach(s => {
+    const h = (s.ac / 7 * 80 + 20);
+    html += `<div class="chart-bar-wrap">
+      <div class="chart-value">${s.ac}</div>
+      <div class="chart-bar" style="height:${h}%;background:linear-gradient(#667eea,#764ba2);"></div>
+      <div class="chart-label">${s.period.slice(-3)}</div>
+    </div>`;
+  });
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+// ===== Recommendation Engine =====
+
+function generateRecommendation() {
+  const input = document.getElementById('num-count');
+  const count = parseInt(input.value);
+
+  if (isNaN(count) || count < 2 || count > 20) {
+    alert('請輸入 2 到 20 之間的數字');
+    return;
+  }
+
+  const selectedStars = STAR_CONFIG.filter(s => {
+    const cb = document.getElementById(s.key);
+    return cb && cb.checked && count >= s.pick;
+  });
+
+  if (selectedStars.length === 0) {
+    alert('請至少勾選一個可用的星級（號碼數量需 >= 該星級碼數）');
+    return;
+  }
+
+  if (drawData.length === 0) {
+    alert('尚未載入開獎資料');
+    return;
+  }
+
+  const scores = calculateScores();
+  const recommended = selectNumbers(scores, count);
+  const reasons = buildReasons(recommended, scores);
+
+  displayRecommendation(recommended, reasons);
+  displayCostCalculation(count, recommended, selectedStars);
+}
+
+function calculateScores() {
+  const scores = {};
+  for (let i = 1; i <= 39; i++) scores[i] = 0;
+
+  const freq = getFrequency();
+  const maxFreq = Math.max(...Object.values(freq));
+
+  for (let i = 1; i <= 39; i++) {
+    scores[i] += (freq[i] / maxFreq) * 25;
+  }
+
+  const missing = getMissingValues();
+  const maxMiss = Math.max(...Object.values(missing));
+  for (let i = 1; i <= 39; i++) {
+    if (missing[i] >= 8) {
+      scores[i] += (missing[i] / maxMiss) * 20;
+    }
+  }
+
+  const recentFreq = {};
+  for (let i = 1; i <= 39; i++) recentFreq[i] = 0;
+  const recentN = Math.min(15, drawData.length);
+  for (let i = 0; i < recentN; i++) {
+    drawData[i].numbers.forEach(n => recentFreq[n]++);
+  }
+  const maxRecent = Math.max(...Object.values(recentFreq));
+  for (let i = 1; i <= 39; i++) {
+    scores[i] += (recentFreq[i] / (maxRecent || 1)) * 20;
+  }
+
+  const tails = getTailStats();
+  const avgTail = Object.values(tails).reduce((a, b) => a + b, 0) / 10;
+  for (let i = 1; i <= 39; i++) {
+    const tail = i % 10;
+    if (tails[tail] > avgTail) {
+      scores[i] += 5;
+    }
+  }
+
+  const consec = getConsecutiveStats();
+  for (const [pair, count] of Object.entries(consec.pairCount)) {
+    if (count >= 3) {
+      const [a, b] = pair.split('-').map(Number);
+      scores[a] += 3;
+      scores[b] += 3;
+    }
+  }
+
+  const lastDraw = drawData[0].numbers;
+  const secondLast = drawData.length > 1 ? drawData[1].numbers : [];
+  for (let i = 1; i <= 39; i++) {
+    if (lastDraw.includes(i) && secondLast.includes(i)) {
+      scores[i] -= 5;
+    }
+  }
+
+  const ranges = getRangeStats();
+  const avgRange = Object.values(ranges).reduce((a, b) => a + b, 0) / 6;
+  const rangeDef = [[1,7],[8,14],[15,21],[22,28],[29,35],[36,39]];
+  const rangeKeys = Object.keys(ranges);
+  for (let i = 1; i <= 39; i++) {
+    for (let r = 0; r < rangeDef.length; r++) {
+      if (i >= rangeDef[r][0] && i <= rangeDef[r][1]) {
+        if (ranges[rangeKeys[r]] > avgRange * 1.1) {
+          scores[i] += 3;
+        }
+        break;
+      }
+    }
+  }
+
+  return scores;
+}
+
+function selectNumbers(scores, count) {
+  const sorted = Object.entries(scores)
+    .map(([n, s]) => ({ num: parseInt(n), score: s }))
+    .sort((a, b) => b.score - a.score);
+
+  const selected = [];
+  let oddCount = 0, smallCount = 0;
+
+  for (const item of sorted) {
+    if (selected.length >= count) break;
+
+    const isOdd = item.num % 2 === 1;
+    const isSmall = item.num <= 19;
+
+    if (selected.length >= count - 2 && count >= 4) {
+      const oddRatio = oddCount / (selected.length || 1);
+      const smallRatio = smallCount / (selected.length || 1);
+
+      if (oddRatio > 0.7 && isOdd) continue;
+      if (oddRatio < 0.3 && !isOdd) continue;
+      if (smallRatio > 0.7 && isSmall) continue;
+      if (smallRatio < 0.3 && !isSmall) continue;
+    }
+
+    selected.push(item.num);
+    if (isOdd) oddCount++;
+    if (isSmall) smallCount++;
+  }
+
+  while (selected.length < count) {
+    for (let i = 1; i <= 39; i++) {
+      if (!selected.includes(i)) {
+        selected.push(i);
+        if (selected.length >= count) break;
+      }
+    }
+  }
+
+  return selected.sort((a, b) => a - b);
+}
+
+function buildReasons(recommended, scores) {
+  const freq = getFrequency();
+  const missing = getMissingValues();
+  const lines = [];
+
+  const sortedFreq = Object.values(freq).sort((a, b) => b - a);
+  const hotThreshold = sortedFreq[9] || 0;
+  const hotNums = recommended.filter(n => freq[n] >= hotThreshold);
+  if (hotNums.length > 0) {
+    lines.push(`熱號推薦：${hotNums.join(', ')}（近期出現頻率較高）`);
+  }
+
+  const coldNums = recommended.filter(n => missing[n] >= 8);
+  if (coldNums.length > 0) {
+    lines.push(`遺漏回補：${coldNums.join(', ')}（已多期未開出，具回補潛力）`);
+  }
+
+  if (recommended.length >= 4) {
+    const oddCount = recommended.filter(n => n % 2 === 1).length;
+    const evenCount = recommended.length - oddCount;
+    lines.push(`奇偶比 ${oddCount}:${evenCount}`);
+
+    const smallCount = recommended.filter(n => n <= 19).length;
+    const bigCount = recommended.length - smallCount;
+    lines.push(`大小比 ${bigCount}:${smallCount}（大:小）`);
+  }
+
+  return lines;
+}
+
+function displayRecommendation(numbers, reasons) {
+  const section = document.getElementById('recommendation');
+  section.style.display = 'block';
+
+  document.getElementById('rec-numbers').innerHTML = numbers
+    .map(n => `<span class="ball">${String(n).padStart(2, '0')}</span>`).join('');
+
+  document.getElementById('rec-reason').innerHTML =
+    '<strong>推薦依據：</strong><br>' + reasons.join('<br>');
+
+  section.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// ===== Cost & Profit Calculation (Correct 539 rules) =====
+
+function displayCostCalculation(numCount, recommended, selectedStars) {
+  const section = document.getElementById('cost-section');
+  section.style.display = 'block';
+
+  const maxMatch = Math.min(numCount, 5);
+
+  const starData = selectedStars.map(star => {
+    const bets = comb(numCount, star.pick);
+    const cost = bets * COST_PER_BET;
+    const winBets = comb(maxMatch, star.pick);
+    const totalPrize = winBets * star.prize;
+    return { ...star, bets, cost, winBets, totalPrize };
+  });
+
+  const totalBets = starData.reduce((s, d) => s + d.bets, 0);
+  const totalCost = starData.reduce((s, d) => s + d.cost, 0);
+
+  const profitLabel = numCount <= 5
+    ? `假設 ${numCount} 碼全部中獎`
+    : `假設中 5 碼（最大中獎數）`;
+
+  let detailHtml = '<div class="cost-summary-grid">';
+  detailHtml += `<div class="cost-summary-item">
+    <span class="cost-summary-label">選取號碼數</span>
+    <span class="cost-summary-value">${numCount} 碼</span>
+  </div>`;
+  detailHtml += `<div class="cost-summary-item">
+    <span class="cost-summary-label">投注星級</span>
+    <span class="cost-summary-value">${selectedStars.map(s => s.name).join('+')}</span>
+  </div>`;
+  detailHtml += `<div class="cost-summary-item">
+    <span class="cost-summary-label">總碰數</span>
+    <span class="cost-summary-value">${totalBets.toLocaleString()} 碰</span>
+  </div>`;
+  detailHtml += `<div class="cost-summary-item">
+    <span class="cost-summary-label">單碰成本</span>
+    <span class="cost-summary-value">$${COST_PER_BET}</span>
+  </div>`;
+  detailHtml += `<div class="cost-summary-item highlight">
+    <span class="cost-summary-label">總成本</span>
+    <span class="cost-summary-value">$${totalCost.toLocaleString()}</span>
+  </div>`;
+  detailHtml += '</div>';
+
+  document.getElementById('cost-detail').innerHTML = detailHtml;
+  document.getElementById('profit-header').textContent = `獲利試算（${profitLabel}）`;
+
+  const tbody = document.getElementById('profit-body');
+  let totalPrizeAll = 0;
+  let html = '';
+
+  for (const d of starData) {
+    const netProfit = d.totalPrize - d.cost;
+    const profitClass = netProfit >= 0 ? 'positive' : 'negative';
+    totalPrizeAll += d.totalPrize;
+
+    html += `<tr>
+      <td>${d.name}</td>
+      <td>${d.bets.toLocaleString()} 碰</td>
+      <td>$${COST_PER_BET}</td>
+      <td>$${d.cost.toLocaleString()}</td>
+      <td>$${d.prize.toLocaleString()}</td>
+      <td>${d.winBets.toLocaleString()} 碰</td>
+      <td>$${d.totalPrize.toLocaleString()}</td>
+      <td class="${profitClass}">${netProfit >= 0 ? '+' : ''}$${netProfit.toLocaleString()}</td>
+    </tr>`;
+  }
+
+  tbody.innerHTML = html;
+
+  const totalNetProfit = totalPrizeAll - totalCost;
+  const totalProfitClass = totalNetProfit >= 0 ? 'positive' : 'negative';
+  document.getElementById('total-cost-cell').innerHTML = `<strong>$${totalCost.toLocaleString()}</strong>`;
+  document.getElementById('total-prize-cell').innerHTML = `<strong>$${totalPrizeAll.toLocaleString()}</strong>`;
+  document.getElementById('total-profit-cell').innerHTML = `<strong class="${totalProfitClass}">${totalNetProfit >= 0 ? '+' : ''}$${totalNetProfit.toLocaleString()}</strong>`;
+}
+
+function comb(n, r) {
+  if (r > n) return 0;
+  if (r === 0 || r === n) return 1;
+  let result = 1;
+  for (let i = 0; i < r; i++) {
+    result = result * (n - i) / (i + 1);
+  }
+  return Math.round(result);
+}
