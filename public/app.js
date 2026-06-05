@@ -271,6 +271,43 @@ function getNumberAssociation(num) {
   };
 }
 
+// 滯後關聯規律：找出「X 出現後第 L 期常開出 Y」的規律，並判斷本期是否正逢觸發時機
+// 邏輯：X 上次出現距今 m 期 → 即將開的這期，正是距 X 第 (m+1) 期。
+//       若歷史上「X 出現後第 (m+1) 期」常開出 Y，則本期推薦 Y。
+function getLaggedPatternSignals() {
+  const maxLag = 8;
+  const minCount = drawData.length >= 40 ? 3 : 2;
+
+  const appear = {};
+  for (let n = 1; n <= 39; n++) appear[n] = [];
+  drawData.forEach((d, i) => d.numbers.forEach(n => appear[n].push(i)));
+
+  const signals = [];
+  for (let x = 1; x <= 39; x++) {
+    const xs = appear[x];
+    if (!xs.length) continue;
+    const m = xs[0];               // 距上次出現幾期（0 = 最新期就有）
+    const targetLag = m + 1;       // 即將開的這期 = 距 X 第幾期
+    if (targetLag > maxLag) continue;
+
+    const follow = {};
+    let opportunities = 0;
+    for (const i of xs) {
+      const j = i - targetLag;     // 該次 X 出現後第 targetLag 期（index 越小越新）
+      if (j < 0) continue;         // 落在未來、無法觀測
+      opportunities++;
+      drawData[j].numbers.forEach(y => { follow[y] = (follow[y] || 0) + 1; });
+    }
+    for (const [y, c] of Object.entries(follow)) {
+      if (c >= minCount && parseInt(y) !== x) {
+        signals.push({ x, y: parseInt(y), lag: targetLag, count: c, opportunities, xMissing: m });
+      }
+    }
+  }
+  signals.sort((a, b) => b.count - a.count);
+  return signals;
+}
+
 // ===== Tab Rendering =====
 
 function renderTabContent(tab) {
@@ -678,15 +715,16 @@ function generateRecommendation() {
     return;
   }
 
-  const scores = calculateScores();
+  const signals = getLaggedPatternSignals();
+  const scores = calculateScores(signals);
   const recommended = selectNumbers(scores, count);
-  const reasons = buildReasons(recommended, scores);
+  const reasons = buildReasons(recommended, scores, signals);
 
   displayRecommendation(recommended, reasons);
   displayCostCalculation(count, recommended, selectedStars);
 }
 
-function calculateScores() {
+function calculateScores(signals) {
   const scores = {};
   for (let i = 1; i <= 39; i++) scores[i] = 0;
 
@@ -768,6 +806,17 @@ function calculateScores() {
     }
   }
 
+  // 滯後關聯規律：「X 出現後第 L 期常開 Y」且本期正逢觸發 → 大幅加分（取每個 Y 的最強訊號）
+  if (signals && signals.length) {
+    const bestByY = {};
+    for (const s of signals) {
+      if (!bestByY[s.y] || s.count > bestByY[s.y].count) bestByY[s.y] = s;
+    }
+    for (const y in bestByY) {
+      scores[y] += Math.min(bestByY[y].count * 8, 40);
+    }
+  }
+
   return scores;
 }
 
@@ -812,21 +861,41 @@ function selectNumbers(scores, count) {
   return selected.sort((a, b) => a - b);
 }
 
-function buildReasons(recommended, scores) {
+function buildReasons(recommended, scores, signals) {
   const freq = getFrequency();
   const missing = getMissingValues();
   const lines = [];
+  const pad = n => String(n).padStart(2, '0');
+
+  // 滯後關聯規律（最重要，放最前面）：每個被推薦號碼取其最強的觸發規律
+  if (signals && signals.length) {
+    const bestByY = {};
+    for (const s of signals) {
+      if (!bestByY[s.y] || s.count > bestByY[s.y].count) bestByY[s.y] = s;
+    }
+    const fired = recommended
+      .filter(n => bestByY[n])
+      .map(n => bestByY[n])
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+    fired.forEach(s => {
+      lines.push(
+        `🎯 規律推薦 ${pad(s.y)}：歷史上「${pad(s.x)}」出現後第 ${s.lag} 期常開出 ${pad(s.y)}` +
+        `（${s.opportunities} 次機會中 ${s.count} 次）；目前 ${pad(s.x)} 已 ${s.xMissing} 期未開，本期正逢第 ${s.lag} 期`
+      );
+    });
+  }
 
   const sortedFreq = Object.values(freq).sort((a, b) => b - a);
   const hotThreshold = sortedFreq[9] || 0;
   const hotNums = recommended.filter(n => freq[n] >= hotThreshold);
   if (hotNums.length > 0) {
-    lines.push(`熱號推薦：${hotNums.join(', ')}（近期出現頻率較高）`);
+    lines.push(`熱號推薦：${hotNums.map(pad).join(', ')}（近期出現頻率較高）`);
   }
 
   const coldNums = recommended.filter(n => missing[n] >= 8);
   if (coldNums.length > 0) {
-    lines.push(`遺漏回補：${coldNums.join(', ')}（已多期未開出，具回補潛力）`);
+    lines.push(`遺漏回補：${coldNums.map(pad).join(', ')}（已多期未開出，具回補潛力）`);
   }
 
   if (recommended.length >= 4) {
